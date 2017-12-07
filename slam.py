@@ -45,8 +45,8 @@ class EKF_SLAM(SLAM):
     self.R = np.diag([x_stdev, y_stdev, th_stdev])
 
     # Measurement noise TODO: parameters for this
-    self.Q = np.diag([x_stdev, y_stdev]) / 100
-    self.S = np.diag([x_stdev, y_stdev]) / 100
+    self.Q = np.diag([x_stdev, y_stdev]) / 2
+    self.S = np.diag([x_stdev, y_stdev]) / 2
 
     self.mean = np.zeros(3, dtype='float64')
     self.cov = np.zeros((3,3), dtype='float64')
@@ -134,52 +134,26 @@ class EKF_SLAM(SLAM):
     dx, dy = delta
     q = delta.dot(delta)
     rq = np.sqrt(q)
-
     # Innovation
     z = np.array([float(r), phi])
     zhat = np.array([rq, np.arctan2(dy, dx) - self.mean[2]])
-
-    # Table 10.1 line 15
+    # Filter to expand the jacobian to the Cov mtx
     Fxj = np.zeros((5, 3 + 2 * self.N))
     Fxj[:3, :3] = np.identity(3)
     Fxj[3:5, 2*j+3: 2*j+5] = np.identity(2)
-
-    # Table 10.1 line 16
-
-    print("\nTHIS IS H\n")
-
-    print("q %f, rq %f, dx %f, dy %f"%(q,rq,dx,dy))
-
+    # Jacobian of measurement model
     H = (np.array(
           [[-rq * dx, -rq * dy, 0 , rq * dx, rq * dy],
            [ dy     , -dx     , -q, -dy    , dx     ]]) / q
         ).dot(Fxj)
     HT = H.transpose()
-
-    np.set_printoptions(precision=4,suppress=True)
-
-    print(z, zhat)
-    print(H)
-
     # Kalman gain
     K = self.cov.dot(HT).dot(np.linalg.inv(H.dot(self.cov).dot(HT) + self.Q))
-
-    print("K")
-    print(K)
-
-    print("z-zhat")
-    print(z-zhat)
-
-    print("K(z-zhat)")
-    print(K.dot(z-zhat))
-
-    print("(I - KH)")
-    print((np.identity(self.mean.size) - K.dot(H)))
-
-    print("\nTHIS IS H\n")
-
+    # Deal with radian wrap around
+    zz = z - zhat
+    if zz[1] > np.pi / 2: zz[1] = zz[1] - 2*np.pi
     # Update
-    self.mean += K.dot(z - zhat)
+    self.mean += K.dot(zz)
     self.mean[2] %= 2*np.pi
     self.cov = (np.identity(self.mean.size) - K.dot(H)).dot(self.cov)
 
