@@ -45,7 +45,8 @@ class EKF_SLAM(SLAM):
     self.R = np.diag([x_stdev, y_stdev, th_stdev])
 
     # Measurement noise TODO: parameters for this
-    self.Q = np.diag([x_stdev, y_stdev, th_stdev])
+    self.Q = np.diag([x_stdev, y_stdev])
+    self.S = np.diag([x_stdev, y_stdev]) / 100
 
     self.mean = np.zeros(3, dtype='float64')
     self.cov = np.zeros((3,3), dtype='float64')
@@ -56,7 +57,7 @@ class EKF_SLAM(SLAM):
     return self.mean[3 + 2 * j : 3 + 2 * j + 2]
 
   def featureCov(self,j):
-    return self.cov[3 + 3*j: 6 + 3*j, 3 + 3*j: 6 + 3*j]
+    return self.cov[3 + 2*j: 5 + 2*j, 3 + 2*j: 5 + 2*j]
 
   def show(self, sigma=3):
     """Returns a 3 sigma visualization about every point."""
@@ -64,11 +65,18 @@ class EKF_SLAM(SLAM):
     fig, ax = plt.subplots(figsize=(5, 5))
 
     # Plot robot position
-    plotCovariance(ax, self.mean[0:2], self.cov[0:3, 0:3], sigma, 'b')
+    plotCovariance(ax,
+      self.mean[0:2],
+      self.cov[0:2, 0:2],
+      sigma, 'b','bot', self.mean[2])
 
     # Plot map features
-    for i in range(self.N):
-      plotCovariance(ax, self.featureMean(i), self.featureCov(i), sigma, 'r')
+    for tag in self.features:
+      i = self.features[tag]
+      plotCovariance(ax,
+        self.featureMean(i),
+        self.featureCov(i),
+        sigma, 'r', str(tag))
 
     plt.xlim((-5,5))
     plt.ylim((-5,5))
@@ -96,12 +104,8 @@ class EKF_SLAM(SLAM):
     G = np.identity(2 * self.N + 3) + FxT.dot(G).dot(Fx)
 
     # See Probablistic robots table 10.1 line 5
-    R = np.zeros(self.cov.shape)
-    R[0:3,0:3] = self.R
-    print(self.cov.shape)
-    print(G.shape)
-    print(Fx.shape)
-    self.cov = G.dot(self.cov).dot(G.transpose()) + FxT.dot(R).dot(Fx)
+    self.cov = G.dot(self.cov).dot(G.transpose())
+    self.cov += FxT.dot(self.R).dot(Fx)
 
   def augment(self, r, phi, featureID):
     """Augment mean and covariance matrix with the new landmark."""
@@ -115,82 +119,66 @@ class EKF_SLAM(SLAM):
     U[0,2] = r *  np.cos(th + phi)
     U[1,2] = r * -np.sin(th + phi)
     UT = U.transpose()
-    np.vstack([
+    self.cov = np.vstack([
       np.hstack([self.cov       , self.cov.dot(UT)]),
-      np.hstack([U.dot(self.cov), U.dot(self.cov).dot(UT) + self.R])
+      np.hstack([U.dot(self.cov), U.dot(self.cov).dot(UT) + self.S])
     ]) # TODO: don't use self.R there should be another set of parameters
 
-    self.N += 1
     self.features[featureID] = self.N
+    self.N += 1
 
   def single_update(self, r, phi, featureID):
     """Updates mean and covariance given this observation."""
     j = self.features[featureID]
+
+    delta = self.featureMean(j) - self.mean[0:2]
+    q = delta.dot(delta)
+    rq = np.sqrt(q)
+    dx, dy = delta
+
+    # Innovation
+    z = np.array([r, phi])
+    zhat = np.array([rq, np.arctan2(dy, dx) - self.mean[2]])
+
+    # Table 10.1 line 15
+    Fxj = np.zeros((5, 3 + 2 * self.N))
+    Fxj[0:3,0:3] = np.identity(3)
+    Fxj[3:5, 2*j+3: 2*j+5] = np.identity(2)
+
+    # Table 10.1 line 16
+    H = (np.array(
+          [[-rq * dx, -rq * dy, 0 , rq * dx, rq * dy],
+           [dy      , dx      , -q, -dy    , -dx    ]]) / q
+        ).dot(Fxj)
+    HT = H.transpose()
+
+    # Kalman gain
+    K = self.cov.dot(HT).dot(np.linalg.inv(H.dot(self.cov).dot(HT) + self.Q))
+
+    # Update
+    self.mean += K.dot(z - zhat)
+    self.cov = (np.identity(self.mean.size) + K.dot(H)).dot(self.cov)
 
 
   def update(self, features):
     """Updates state given features.
     See Probablistic Robotics Chapter 10 for maths.
     """
-    # Add new features
-    for aID, r, phi in features:
-      if aID not in self.features:
+    for featureID, r, phi in features:
+      if featureID in self.features:
+        self.single_update(r,phi, featureID)
+      else:
         self.augment(r, phi, featureID)
 
 
-    meanUpdate = np.zeros(self.mean.shape).flatten()
-    covUpdate = np.zeros(self.cov.shape)
-
-    # Calculate updates for features
-    for aID, r, phi in features:
-      j = self.features[aID]
-
-      # Table 10.1 line 12 - 13
-      delta = self.mean[0:2] - self.featureMean(j)
-      dx, dy = delta
-      q = np.inner(delta,delta)
-      rq = q ** .5
-
-      # Table 10.1 line 14
-      zhat = np.array([rq, np.arctan2(dy, dx), aID])
-
-      # Table 10.1 line 15
-      Fxj = np.zeros((6, 2 * self.N + 4))
-      Fxj[:3,:3] = np.identity(3)
-      Fxj[3:6, j*2+3:j*2+6 ] = np.identity(3)
-      print("FXJ")
-      print(Fxj)
-
-      # Table 10.1 line 16
-      Hi = np.array([[rq * dx, -rq * dy, 0  , -rq * dx, rq * dy, 0],
-                     [dy     , dx      , -1 , -dy     , -dx    , 0],
-                     [0      , 0       , 0  , 0       , 0      , 1]])
-      Hi = Hi.dot(Fxj) / q
-
-      # Table 10.1 line 17
-      HiT = Hi.transpose()
-      inv = np.linalg.inv(Hi.dot(self.cov).dot(HiT) + self.Q)
-      Ki = self.cov.dot(HiT).dot(inv)
-
-      # Accumulating updates for summations in table 10.1 lines 19,20
-      meanUpdate += Ki.dot(np.array([r, phi, aID]) - zhat)
-      covUpdate += Ki.dot(Hi)
-
-    # Table 10.1 lines 19, 20
-    self.mean += meanUpdate
-    self.cov = (np.identity(self.cov.shape[0]) - covUpdate).dot(self.cov)
-    print()
-    print("Mean",self.mean)
-    print(self.cov)
 
 
-
-
-
-def plotCovariance(ax, xy, cov, sigma, color):
+def plotCovariance(ax, xy, cov, sigma, color, name, angle=None):
   """Plots one point and its 3 sigma covariance matrix."""
 
+  x, y = xy
   evals, evecs = np.linalg.eigh(cov)
+
   ell = Ellipse(xy = xy,
                 width = evals[0] * sigma * 2,
                 height= evals[1] * sigma * 2,
@@ -198,7 +186,11 @@ def plotCovariance(ax, xy, cov, sigma, color):
                 alpha = 0.1,
                 color = color)
   ax.add_artist(ell)
-  x, y = xy
+
+  plt.annotate(name,xy)
+
+  if angle: plt.arrow(x, y, np.sin(angle), np.cos(angle) )
+
   plt.scatter(x, y, color=color)
 
 

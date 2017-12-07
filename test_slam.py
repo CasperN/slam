@@ -1,6 +1,7 @@
 import numpy as np
 from slam import *
 
+
 def test_predict():
   x = EKF_SLAM()
   np.testing.assert_allclose(x.mean, np.array([0,0,0]))
@@ -15,22 +16,39 @@ def test_predict():
   np.testing.assert_allclose(x.mean, np.array([1,1,np.pi/2]))
 
 
-def test_update():
+def execute_path(path, show = False):
   x = EKF_SLAM()
-  x.predict(0, 1, 1)
-  x.show()
-  x.predict(np.pi, 0, 0.5)
-  x.show()
-  x.predict(0,4, 0.25)
-  x.show()
-  x.update([(0, 1, np.pi/4)])
-  x.show()
-  x.predict(np.pi, 0, 0.5)
-  x.show()
-  x.predict(0, 1, 1)
-  x.show()
-  x.predict(0, 1, 1)
-  x.show()
+  for isPredict, args in path:
+    if isPredict:
+      w, v, dt = args
+      x.predict(w, v, dt)
+    else:
+      x.update(args)
+    if show:
+      print(x.mean)
+      x.show()
+
+def test_update():
+  path = [
+    (True,  (0,1,1)),
+    # (False, [('A',0.5,0)]),
+    (True,  (np.pi/2, 0.5,1)),
+    (False, [('B', 1, 0)]),
+    (True,   (0, 0.5, 1)),
+    # (False, [('B', 0.5, 0)]),
+    (True,  (0 , 0.5,1)),
+    (True,  (np.pi/2, 0 ,1)),
+    (False, [('C', 1, 0)]),
+
+    (True,   (0, 0.5, 1)),
+    # (False, [('C',0.5,0)]),
+    (True,  (np.pi/2, 0.5, 1)),
+    (True,  (0, 0.5, 1)),
+    (True,  (np.pi/2, 0.5, 1)),
+  ]
+
+  execute_path(path, True)
+
 
 
 
