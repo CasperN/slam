@@ -89,14 +89,14 @@ class EKF_SLAM(SLAM):
     """
     # See Probablistic robots table 10.1 line 3 (modified for out model)
     th = self.mean[2]
-    bot_pose_change = np.array([v * np.sin(th), v * np.cos(th), w]) * dt
+    bot_pose_change = np.array([v * np.cos(th), v * np.sin(th), w]) * dt
     self.mean[0:3] += bot_pose_change
     self.mean[2] %= 2*np.pi
 
     # Linearized error of process model
     G = np.identity(2 * self.N + 3)
-    G[0,2] =  v * np.cos(th) * dt
-    G[1,2] = -v * np.sin(th) * dt
+    G[0,2] = -v * np.sin(th) * dt
+    G[1,2] =  v * np.cos(th) * dt
     G[2,2] = w * dt
 
     # Add Gaussian noise to Robot pose
@@ -109,14 +109,14 @@ class EKF_SLAM(SLAM):
   def augment(self, r, phi, featureID):
     """Augment mean and covariance matrix with the new landmark."""
     ux, uy, th = self.mean[0:3]
-    lx = ux + r * np.sin(th + phi)
-    ly = uy + r * np.cos(th + phi)
+    lx = ux + r * np.cos(th + phi)
+    ly = uy + r * np.sin(th + phi)
     self.mean = np.append(self.mean,[lx, ly])
     # U is the linearized function that propagates state error to new landmark
     U = np.zeros((2, 3 + self.N * 2))
     U[0:2,0:2] = np.identity(2)
-    U[0,2] = r *  -np.cos(th + phi)
-    U[1,2] = r *  np.sin(th + phi)
+    U[0,2] = r * -np.sin(th + phi)
+    U[1,2] = r *  np.cos(th + phi)
     UT = U.transpose()
     # Extend covariance matrix
     self.cov = np.vstack([
@@ -137,7 +137,7 @@ class EKF_SLAM(SLAM):
 
     # Innovation
     z = np.array([float(r), phi])
-    zhat = np.array([rq, np.arctan2(dx, dy) - self.mean[2]])
+    zhat = np.array([rq, np.arctan2(dy, dx) - self.mean[2]])
 
     # Table 10.1 line 15
     Fxj = np.zeros((5, 3 + 2 * self.N))
@@ -173,15 +173,15 @@ class EKF_SLAM(SLAM):
     print("K(z-zhat)")
     print(K.dot(z-zhat))
 
-    print("(I + KH)Cov")
-    print(np.identity(self.mean.size) + K.dot(H))
+    print("(I - KH)")
+    print((np.identity(self.mean.size) - K.dot(H)))
 
     print("\nTHIS IS H\n")
 
     # Update
     self.mean += K.dot(z - zhat)
     self.mean[2] %= 2*np.pi
-    self.cov = (np.identity(self.mean.size) + K.dot(H)).dot(self.cov)
+    self.cov = (np.identity(self.mean.size) - K.dot(H)).dot(self.cov)
 
   def update(self, features):
     """Updates state given features.
@@ -189,11 +189,11 @@ class EKF_SLAM(SLAM):
     for featureID, r, phi in features:
 
       if featureID in self.features:
-        print("Single update:(%f, %f, %s)"%(r,phi,featureID))
+        print("Single update:(%f, %f, %s)" % (r,phi,featureID))
         self.single_update(r,phi, featureID)
 
       else:
-        print("Augment:(%f, %f, %s)"%(r,phi,featureID))
+        print("Augment:(%f, %f, %s)" % (r,phi,featureID))
         self.augment(r, phi, featureID)
 
 
@@ -214,7 +214,7 @@ def plotCovariance(ax, xy, cov, sigma, color, name, angle=None):
   plt.annotate(name,xy)
 
   if angle != None:
-    plt.arrow(x, y, np.sin(angle), np.cos(angle) )
+    plt.arrow(x, y, np.cos(angle), np.sin(angle) )
 
   plt.scatter(x, y, color=color)
 
