@@ -1,13 +1,14 @@
 import numpy as np
-# import rospy
 from matplotlib.patches import Ellipse
 import matplotlib.pyplot as plt
+import io
+
 
 class SLAM(object):
   """Simultaneous Localization And Mapping."""
 
   def show(self):
-    """Returns an image visualizing the map and localization."""
+    """Returns an buffer containing image visualizing the map and bot."""
     raise(NotImplementedError())
 
 
@@ -80,7 +81,12 @@ class EKF_SLAM(SLAM):
 
     plt.xlim((-5,5))
     plt.ylim((-5,5))
-    plt.show()
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    plt.close()
+    return buf
 
 
   def predict(self, w , v, dt):
